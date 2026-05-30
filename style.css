@@ -1,0 +1,29 @@
+* { margin: 0; padding: 0; box-sizing: border-box; }
+
+body {
+  background: #1a1a2e;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  padding: 20px;
+  font-family: Arial, sans-serif;
+  color: #eee;
+}
+
+h1 {
+  margin-bottom: 12px;
+  font-size: 28px;
+  color: #f5a623;
+  letter-spacing: 2px;
+}
+
+#gameCanvas {
+  border: 3px solid #f5a623;
+  display: block;
+}
+
+#instructions {
+  margin-top: 10px;
+  font-size: 14px;
+  color: #aaa;
+}
