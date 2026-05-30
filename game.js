@@ -135,38 +135,46 @@ function spawnParticles(cx, cy, color, n=10) {
 }
 
 // ── Input ─────────────────────────────────────────────────
-const keys = {};
+// ── Input system — keyed by e.code (physical key, modifier-independent) ──
+// e.code never changes value when Shift/Caps is held, eliminating sticky-key bugs.
+// AZERTY physical layout mapping used for P2:
+//   KeyW = touche 'Z'   KeyA = touche 'Q'   KeyS = touche 'S'   KeyD = touche 'D'
+const codes = {};
+
+const BLOCKED_CODES = new Set([
+  'ArrowUp','ArrowDown','ArrowLeft','ArrowRight',
+  'Space','Enter','ShiftLeft','ShiftRight',
+  'KeyW','KeyA','KeyS','KeyD',   // P2 AZERTY movement
+]);
+
 window.addEventListener('keydown', e => {
-  // Prevent browser scroll / default on all game keys
-  const blocked = [
-    'ArrowUp','ArrowDown','ArrowLeft','ArrowRight',' ','Enter','Shift',
-    'z','Z','q','Q','s','S','d','D',
-  ];
-  if (blocked.includes(e.key)) e.preventDefault();
-  keys[e.key] = true;
+  if (BLOCKED_CODES.has(e.code)) e.preventDefault();
+  codes[e.code] = true;
 });
-window.addEventListener('keyup', e => { keys[e.key] = false; });
+window.addEventListener('keyup', e => {
+  codes[e.code] = false;
+});
 
-let prevKeys = {};
-function justPressed(k) { return keys[k] && !prevKeys[k]; }
+let prevCodes = {};
+function justPressed(code) { return !!codes[code] && !prevCodes[code]; }
 
-// ── Input directions (STRICTLY separated) ────────────────
+// ── Input directions (STRICTLY separated) ─────────────────
 // P1 : Arrow keys ONLY
 function getDir1() {
-  if (keys['ArrowUp'])    return {dx: 0, dy:-1};
-  if (keys['ArrowDown'])  return {dx: 0, dy: 1};
-  if (keys['ArrowLeft'])  return {dx:-1, dy: 0};
-  if (keys['ArrowRight']) return {dx: 1, dy: 0};
+  if (codes['ArrowUp'])    return {dx: 0, dy:-1};
+  if (codes['ArrowDown'])  return {dx: 0, dy: 1};
+  if (codes['ArrowLeft'])  return {dx:-1, dy: 0};
+  if (codes['ArrowRight']) return {dx: 1, dy: 0};
   return null;
 }
 
-// P2 : Z-Q-S-D (AZERTY layout — e.key reflects the character, not the position)
-//   Z → Haut   Q → Gauche   S → Bas   D → Droite
+// P2 : ZQSD sur clavier AZERTY français
+//   KeyW = Z (haut)   KeyA = Q (gauche)   KeyS = S (bas)   KeyD = D (droite)
 function getDir2() {
-  if (keys['z'] || keys['Z']) return {dx: 0, dy:-1};
-  if (keys['s'] || keys['S']) return {dx: 0, dy: 1};
-  if (keys['q'] || keys['Q']) return {dx:-1, dy: 0};
-  if (keys['d'] || keys['D']) return {dx: 1, dy: 0};
+  if (codes['KeyW']) return {dx: 0, dy:-1};
+  if (codes['KeyS']) return {dx: 0, dy: 1};
+  if (codes['KeyA']) return {dx:-1, dy: 0};
+  if (codes['KeyD']) return {dx: 1, dy: 0};
   return null;
 }
 
@@ -377,14 +385,14 @@ function update(ts) {
   // ── Menu ──
   if (gameState==='menu') {
     if (justPressed('ArrowUp')  || justPressed('ArrowDown')) { menuCursor=(menuCursor+1)%2; soundMenu(); }
-    if (justPressed('Enter') || justPressed(' ')) { playerCount=menuCursor+1; startGame(); }
-    prevKeys={...keys}; return;
+    if (justPressed('Enter') || justPressed('Space')) { playerCount=menuCursor+1; startGame(); }
+    prevCodes={...codes}; return;
   }
 
   // ── End screens ──
   if (gameState==='gameover'||gameState==='victory') {
-    if (justPressed('Enter')||justPressed(' ')) gameState='menu';
-    prevKeys={...keys}; return;
+    if (justPressed('Enter')||justPressed('Space')) gameState='menu';
+    prevCodes={...codes}; return;
   }
 
   // ── Playing ──
@@ -410,7 +418,7 @@ function update(ts) {
   });
 
   // Place bombs P1
-  if (p1.alive && justPressed(' ')) {
+  if (p1.alive && justPressed('Space')) {
     const already=bombs.some(b=>b.row===p1.row&&b.col===p1.col);
     const ownCount=[...p1Bombs].filter(b=>bombs.includes(b)).length;
     if (!already && ownCount<p1.maxBombs) {
@@ -420,7 +428,7 @@ function update(ts) {
   }
 
   // Place bombs P2 — Shift (Maj)
-  if (playerCount===2 && p2.alive && justPressed('Shift')) {
+  if (playerCount===2 && p2.alive && (justPressed('ShiftLeft')||justPressed('ShiftRight'))) {
     const already=bombs.some(b=>b.row===p2.row&&b.col===p2.col);
     const ownCount=[...p2Bombs].filter(b=>bombs.includes(b)).length;
     if (!already && ownCount<p2.maxBombs) {
@@ -473,7 +481,7 @@ function update(ts) {
   else if (playerCount===2 && !p1.alive) { gameState='victory'; soundVictory(); } // P2 wins
   else if (playerCount===2 && !p2.alive) { gameState='victory'; soundVictory(); } // P1 wins
 
-  prevKeys={...keys};
+  prevCodes={...codes};
 }
 
 // ── Draw helpers ──────────────────────────────────────────
