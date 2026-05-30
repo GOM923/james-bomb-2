@@ -137,7 +137,11 @@ function spawnParticles(cx, cy, color, n=10) {
 // ── Input ─────────────────────────────────────────────────
 const keys = {};
 window.addEventListener('keydown', e => {
-  const blocked=['ArrowUp','ArrowDown','ArrowLeft','ArrowRight',' ','Enter'];
+  // Prevent browser scroll / default on all game keys
+  const blocked = [
+    'ArrowUp','ArrowDown','ArrowLeft','ArrowRight',' ','Enter','Shift',
+    'z','Z','q','Q','s','S','d','D',
+  ];
   if (blocked.includes(e.key)) e.preventDefault();
   keys[e.key] = true;
 });
@@ -146,19 +150,23 @@ window.addEventListener('keyup', e => { keys[e.key] = false; });
 let prevKeys = {};
 function justPressed(k) { return keys[k] && !prevKeys[k]; }
 
-// ── Input directions ──────────────────────────────────────
+// ── Input directions (STRICTLY separated) ────────────────
+// P1 : Arrow keys ONLY
 function getDir1() {
-  if (keys['ArrowUp']    || keys['w']||keys['W']) return {dx:0,dy:-1};
-  if (keys['ArrowDown']  || keys['s']||keys['S']) return {dx:0,dy:1};
-  if (keys['ArrowLeft']  || keys['a']||keys['A']) return {dx:-1,dy:0};
-  if (keys['ArrowRight'] || keys['d']||keys['D']) return {dx:1,dy:0};
+  if (keys['ArrowUp'])    return {dx: 0, dy:-1};
+  if (keys['ArrowDown'])  return {dx: 0, dy: 1};
+  if (keys['ArrowLeft'])  return {dx:-1, dy: 0};
+  if (keys['ArrowRight']) return {dx: 1, dy: 0};
   return null;
 }
+
+// P2 : Z-Q-S-D (AZERTY layout — e.key reflects the character, not the position)
+//   Z → Haut   Q → Gauche   S → Bas   D → Droite
 function getDir2() {
-  if (keys['i']||keys['I']) return {dx:0,dy:-1};
-  if (keys['k']||keys['K']) return {dx:0,dy:1};
-  if (keys['j']||keys['J']) return {dx:-1,dy:0};
-  if (keys['l']||keys['L']) return {dx:1,dy:0};
+  if (keys['z'] || keys['Z']) return {dx: 0, dy:-1};
+  if (keys['s'] || keys['S']) return {dx: 0, dy: 1};
+  if (keys['q'] || keys['Q']) return {dx:-1, dy: 0};
+  if (keys['d'] || keys['D']) return {dx: 1, dy: 0};
   return null;
 }
 
@@ -368,9 +376,8 @@ function update(ts) {
 
   // ── Menu ──
   if (gameState==='menu') {
-    if (justPressed('ArrowUp')||justPressed('w')||justPressed('W'))   { menuCursor=(menuCursor+1)%2; soundMenu(); }
-    if (justPressed('ArrowDown')||justPressed('s')||justPressed('S')) { menuCursor=(menuCursor+1)%2; soundMenu(); }
-    if (justPressed('Enter')||justPressed(' ')) { playerCount=menuCursor+1; startGame(); }
+    if (justPressed('ArrowUp')  || justPressed('ArrowDown')) { menuCursor=(menuCursor+1)%2; soundMenu(); }
+    if (justPressed('Enter') || justPressed(' ')) { playerCount=menuCursor+1; startGame(); }
     prevKeys={...keys}; return;
   }
 
@@ -412,8 +419,8 @@ function update(ts) {
     }
   }
 
-  // Place bombs P2
-  if (playerCount===2 && p2.alive && justPressed('Enter')) {
+  // Place bombs P2 — Shift (Maj)
+  if (playerCount===2 && p2.alive && justPressed('Shift')) {
     const already=bombs.some(b=>b.row===p2.row&&b.col===p2.col);
     const ownCount=[...p2Bombs].filter(b=>bombs.includes(b)).length;
     if (!already && ownCount<p2.maxBombs) {
@@ -672,7 +679,7 @@ function drawMenu() {
   // Controls hint
   ctx.font='10px "Courier New"'; ctx.fillStyle='#444';
   ctx.fillText('↑↓ SÉLECTIONNER   ENTRÉE DÉMARRER',canvas.width/2,canvas.height-28);
-  ctx.fillText('P1: WASD/FLÈCHES + ESPACE   P2: IJKL + ENTRÉE',canvas.width/2,canvas.height-14);
+  ctx.fillText('P1: FLÈCHES + ESPACE   P2: ZQSD (AZERTY) + MAJ',canvas.width/2,canvas.height-14);
   ctx.textAlign='left';
 }
 
