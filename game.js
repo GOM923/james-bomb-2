@@ -146,8 +146,7 @@ window.addEventListener('keyup', e => { keys[e.key] = false; });
 let prevKeys = {};
 function justPressed(k) { return keys[k] && !prevKeys[k]; }
 
-// ── Wall-slide movement ───────────────────────────────────
-// Returns { dx, dy } direction from raw key input for a player
+// ── Input directions ──────────────────────────────────────
 function getDir1() {
   if (keys['ArrowUp']    || keys['w']||keys['W']) return {dx:0,dy:-1};
   if (keys['ArrowDown']  || keys['s']||keys['S']) return {dx:0,dy:1};
@@ -163,8 +162,12 @@ function getDir2() {
   return null;
 }
 
-// ── Solid check at pixel position ─────────────────────────
-const MARGIN = 2; // pixels of slop for corner sliding
+// ── Collision constants ───────────────────────────────────
+// MARGIN=10 → hitbox = 28×28 px inside each 48×48 tile.
+// An offset ≤ 10 px never causes the hitbox to cross into the adjacent tile,
+// so those cases slide freely. CORNER_CUT handles the 10–22 px range.
+const MARGIN     = 10;
+const CORNER_CUT = 12;   // px: auto-align threshold when blocked
 
 function tileAt(px, py) {
   const c = Math.floor(px / TILE);
@@ -173,59 +176,101 @@ function tileAt(px, py) {
   return grid[r][c];
 }
 
+// Returns true if the hitbox at (px,py) overlaps any solid tile.
 function isSolidPixel(px, py) {
-  // Check corners of the player hitbox (shrunk by MARGIN)
-  const m = MARGIN;
-  const x1 = px+m, x2 = px+TILE-1-m;
-  const y1 = py+m, y2 = py+TILE-1-m;
-  const t  = [tileAt(x1,y1), tileAt(x2,y1), tileAt(x1,y2), tileAt(x2,y2)];
-  return t.some(v => v===WALL||v===BLOCK);
+  const lo = MARGIN, hi = TILE - 1 - MARGIN;
+  return [[lo,lo],[hi,lo],[lo,hi],[hi,hi]].some(([dx,dy]) => {
+    const t = tileAt(px+dx, py+dy);
+    return t===WALL || t===BLOCK;
+  });
 }
 
-function bombAt(px, py) {
-  const c = Math.floor((px+TILE/2)/TILE);
-  const r = Math.floor((py+TILE/2)/TILE);
-  return bombs.some(b=>b.row===r&&b.col===c);
-}
-
-function movePlayer(p, dir, playerBombs) {
-  if (!p.alive) return;
-  if (!dir) { p.vx=0; p.vy=0; return; }
-
-  const spd = p.speed;
-  let nx = p.px + dir.dx*spd;
-  let ny = p.py + dir.dy*spd;
-
-  // Axis-separate collision + wall sliding
-  const canX = !isSolidPixel(nx, p.py) && !bombBlockAt(nx, p.py, p, playerBombs);
-  const canY = !isSolidPixel(p.px, ny) && !bombBlockAt(p.px, ny, p, playerBombs);
-
-  if (canX && canY) { p.px=nx; p.py=ny; }
-  else if (canX)    { p.px=nx;           } // slide along X
-  else if (canY)    {           p.py=ny; } // slide along Y
-  // else: corner — stop
-
-  // Snap to grid centre if barely misaligned (helps navigate corridors)
-  if (dir.dx===0) { const snap=snapAxis(p.px); if (Math.abs(snap-p.px)<spd) p.px=snap; }
-  if (dir.dy===0) { const snap=snapAxis(p.py); if (Math.abs(snap-p.py)<spd) p.py=snap; }
-
-  // Update logical cell
-  p.row = Math.floor((p.py+TILE/2)/TILE);
-  p.col = Math.floor((p.px+TILE/2)/TILE);
-}
-
-function snapAxis(v) { return Math.round(v/TILE)*TILE; }
-
-// Block movement through bombs that aren't the player's own starting bomb
-function bombBlockAt(nx, ny, player, playerBombs) {
-  const m=MARGIN;
-  const pts=[[nx+m,ny+m],[nx+TILE-1-m,ny+m],[nx+m,ny+TILE-1-m],[nx+TILE-1-m,ny+TILE-1-m]];
-  for (const [px,py] of pts) {
-    const c=Math.floor(px/TILE), r=Math.floor(py/TILE);
-    const b=bombs.find(b=>b.row===r&&b.col===c);
+// Returns true if the hitbox at (px,py) overlaps a bomb the player didn't place.
+function bombBlockAt(px, py, playerBombs) {
+  const lo = MARGIN, hi = TILE - 1 - MARGIN;
+  for (const [dx,dy] of [[lo,lo],[hi,lo],[lo,hi],[hi,hi]]) {
+    const c = Math.floor((px+dx)/TILE), r = Math.floor((py+dy)/TILE);
+    const b = bombs.find(b => b.row===r && b.col===c);
     if (b && !playerBombs.has(b)) return true;
   }
   return false;
+}
+
+// ── AABB corner-cutting movement ──────────────────────────
+// When the player is blocked in their travel direction but is ≤ CORNER_CUT px
+// from the centre of an adjacent corridor, we nudge them orthogonally so they
+// glide into the opening — the classic Bomberman feel.
+function movePlayer(p, dir, playerBombs) {
+  if (!p.alive || !dir) return;
+
+  const spd = p.speed;
+
+  if (dir.dy !== 0) {
+    // ── Vertical ──
+    const ny = p.py + dir.dy * spd;
+    if (!isSolidPixel(p.px, ny) && !bombBlockAt(p.px, ny, playerBombs)) {
+      p.py = ny;
+      _alignAxis('px', p, spd, p.py);   // keep drifting toward column centre
+    } else {
+      // Corner-cut: nudge X toward nearest column centre, then retry upward
+      if (_cornerCutAxis('px', p, spd, ny)) {
+        const ny2 = p.py + dir.dy * spd;
+        if (!isSolidPixel(p.px, ny2) && !bombBlockAt(p.px, ny2, playerBombs))
+          p.py = ny2;
+      }
+    }
+
+  } else {
+    // ── Horizontal ──
+    const nx = p.px + dir.dx * spd;
+    if (!isSolidPixel(nx, p.py) && !bombBlockAt(nx, p.py, playerBombs)) {
+      p.px = nx;
+      _alignAxis('py', p, spd, p.px);   // keep drifting toward row centre
+    } else {
+      // Corner-cut: nudge Y toward nearest row centre, then retry sideways
+      if (_cornerCutAxis('py', p, spd, nx)) {
+        const nx2 = p.px + dir.dx * spd;
+        if (!isSolidPixel(nx2, p.py) && !bombBlockAt(nx2, p.py, playerBombs))
+          p.px = nx2;
+      }
+    }
+  }
+
+  p.row = Math.floor((p.py + TILE/2) / TILE);
+  p.col = Math.floor((p.px + TILE/2) / TILE);
+}
+
+// Gently pull the orthogonal axis toward its nearest tile centre while moving.
+// otherPos = current value of the moving axis (used to check the nudge is safe).
+function _alignAxis(axis, p, spd, otherPos) {
+  const snap = Math.round(p[axis] / TILE) * TILE;
+  const diff = snap - p[axis];
+  if (diff === 0) return;
+  const nudge  = Math.sign(diff) * Math.min(Math.abs(diff), spd);
+  const testPx = axis==='px' ? p.px+nudge : p.px;
+  const testPy = axis==='py' ? p.py+nudge : p.py;
+  if (!isSolidPixel(testPx, testPy)) p[axis] += nudge;
+}
+
+// Attempt a corner-cut on `axis` (the orthogonal axis).
+// targetOther = the destination on the travel axis (used to verify the cut is safe).
+// Returns true if a nudge was applied.
+function _cornerCutAxis(axis, p, spd, targetOther) {
+  const snap = Math.round(p[axis] / TILE) * TILE;
+  const diff = snap - p[axis];
+  if (diff === 0 || Math.abs(diff) > CORNER_CUT) return false;
+
+  const nudge  = Math.sign(diff) * Math.min(Math.abs(diff), spd);
+  // Check the nudge at the TARGET position on the travel axis (not current)
+  const testPx = axis==='px' ? p.px+nudge : targetOther - (p.px - p.px); // stays same
+  const testPy = axis==='py' ? p.py+nudge : targetOther - (p.py - p.py);
+  // Simpler: build coords explicitly
+  const chkPx  = axis==='px' ? p.px+nudge : p.px;
+  const chkPy  = axis==='py' ? p.py+nudge : p.py;
+  if (isSolidPixel(chkPx, chkPy)) return false;
+
+  p[axis] += nudge;
+  return true;
 }
 
 // ── Explosion logic ───────────────────────────────────────
