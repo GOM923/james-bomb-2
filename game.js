@@ -111,8 +111,8 @@ function makePlayer(row, col, color, borderColor) {
     row, col,
     px: col*TILE, py: row*TILE,   // pixel position (top-left of tile)
     vx: 0, vy: 0,                 // pixel velocity
-    speed: 3,
-    bombRange: 2, maxBombs: 1,
+    speed: 2,
+    bombRange: 1, maxBombs: 1,
     color, borderColor,
     alive: true,
   };
@@ -165,9 +165,10 @@ function getDir2() {
 // ── Collision constants ───────────────────────────────────
 // MARGIN=10 → hitbox = 28×28 px inside each 48×48 tile.
 // An offset ≤ 10 px never causes the hitbox to cross into the adjacent tile,
-// so those cases slide freely. CORNER_CUT handles the 10–22 px range.
+// so those cases slide freely. CORNER_CUT handles offsets up to ~22 px.
 const MARGIN     = 10;
-const CORNER_CUT = 12;   // px: auto-align threshold when blocked
+const CORNER_CUT = 22;   // px: auto-align threshold when blocked (generous magnet)
+const ALIGN_SPEED = 4;   // px/frame: magnet pull toward corridor centre (independent of player speed)
 
 function tileAt(px, py) {
   const c = Math.floor(px / TILE);
@@ -210,10 +211,10 @@ function movePlayer(p, dir, playerBombs) {
     const ny = p.py + dir.dy * spd;
     if (!isSolidPixel(p.px, ny) && !bombBlockAt(p.px, ny, playerBombs)) {
       p.py = ny;
-      _alignAxis('px', p, spd, p.py);   // keep drifting toward column centre
+      _alignAxis('px', p);   // magnet toward column centre
     } else {
-      // Corner-cut: nudge X toward nearest column centre, then retry upward
-      if (_cornerCutAxis('px', p, spd, ny)) {
+      // Corner-cut: nudge X toward nearest column centre, then retry
+      if (_cornerCutAxis('px', p)) {
         const ny2 = p.py + dir.dy * spd;
         if (!isSolidPixel(p.px, ny2) && !bombBlockAt(p.px, ny2, playerBombs))
           p.py = ny2;
@@ -225,10 +226,10 @@ function movePlayer(p, dir, playerBombs) {
     const nx = p.px + dir.dx * spd;
     if (!isSolidPixel(nx, p.py) && !bombBlockAt(nx, p.py, playerBombs)) {
       p.px = nx;
-      _alignAxis('py', p, spd, p.px);   // keep drifting toward row centre
+      _alignAxis('py', p);   // magnet toward row centre
     } else {
-      // Corner-cut: nudge Y toward nearest row centre, then retry sideways
-      if (_cornerCutAxis('py', p, spd, nx)) {
+      // Corner-cut: nudge Y toward nearest row centre, then retry
+      if (_cornerCutAxis('py', p)) {
         const nx2 = p.px + dir.dx * spd;
         if (!isSolidPixel(nx2, p.py) && !bombBlockAt(nx2, p.py, playerBombs))
           p.px = nx2;
@@ -240,36 +241,30 @@ function movePlayer(p, dir, playerBombs) {
   p.col = Math.floor((p.px + TILE/2) / TILE);
 }
 
-// Gently pull the orthogonal axis toward its nearest tile centre while moving.
-// otherPos = current value of the moving axis (used to check the nudge is safe).
-function _alignAxis(axis, p, spd, otherPos) {
+// Pull the orthogonal axis toward its nearest tile centre while the player moves.
+// Uses ALIGN_SPEED (faster than walk speed) for a strong magnet feel.
+function _alignAxis(axis, p) {
   const snap = Math.round(p[axis] / TILE) * TILE;
   const diff = snap - p[axis];
   if (diff === 0) return;
-  const nudge  = Math.sign(diff) * Math.min(Math.abs(diff), spd);
+  const nudge  = Math.sign(diff) * Math.min(Math.abs(diff), ALIGN_SPEED);
   const testPx = axis==='px' ? p.px+nudge : p.px;
   const testPy = axis==='py' ? p.py+nudge : p.py;
   if (!isSolidPixel(testPx, testPy)) p[axis] += nudge;
 }
 
-// Attempt a corner-cut on `axis` (the orthogonal axis).
-// targetOther = the destination on the travel axis (used to verify the cut is safe).
-// Returns true if a nudge was applied.
-function _cornerCutAxis(axis, p, spd, targetOther) {
+// Corner-cut on `axis` (orthogonal to travel direction) when the player is blocked.
+// Snaps the player fully to the nearest corridor centre in one frame (magnet).
+// Only triggers if misalignment ≤ CORNER_CUT and the snapped position is free.
+function _cornerCutAxis(axis, p) {
   const snap = Math.round(p[axis] / TILE) * TILE;
   const diff = snap - p[axis];
   if (diff === 0 || Math.abs(diff) > CORNER_CUT) return false;
-
-  const nudge  = Math.sign(diff) * Math.min(Math.abs(diff), spd);
-  // Check the nudge at the TARGET position on the travel axis (not current)
-  const testPx = axis==='px' ? p.px+nudge : targetOther - (p.px - p.px); // stays same
-  const testPy = axis==='py' ? p.py+nudge : targetOther - (p.py - p.py);
-  // Simpler: build coords explicitly
-  const chkPx  = axis==='px' ? p.px+nudge : p.px;
-  const chkPy  = axis==='py' ? p.py+nudge : p.py;
+  // Verify the snap destination is not itself solid before committing
+  const chkPx = axis==='px' ? snap : p.px;
+  const chkPy = axis==='py' ? snap : p.py;
   if (isSolidPixel(chkPx, chkPy)) return false;
-
-  p[axis] += nudge;
+  p[axis] = snap;   // instant full correction — classic Bomberman magnet
   return true;
 }
 
