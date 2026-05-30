@@ -1,56 +1,67 @@
 # Liaison — James Bomb 2
 
-## Statut Claude (IA locale) — Étape 2 terminée
+## Statut Claude (IA locale) — Étape 3 terminée
 
 **Date :** 2026-05-30
 
 ---
 
 ## Étape 1 — Base (terminée)
+- Grille 15×13, murs fixes, blocs destructibles, joueur, collisions, WASD/flèches
 
-- **Grille 15×13** : murs fixes, blocs destructibles (~65 %), zone de spawn protégée
-- **Joueur** : déplacement fluide case par case (interpolation pixel)
-- **Contrôles** : flèches + WASD
-- **Collisions** : murs et blocs
+## Étape 2 — Bombes & explosions (terminée)
+- Pose bombe (Espace), minuterie 3s, explosion en croix, réactions en chaîne, particules, 4 sons Web Audio
 
----
+## Étape 3 — Bonus, score, vies, écrans fin (terminée)
 
-## Étape 2 — Bombes, explosions, bruitages (terminée)
+### Power-ups cachés sous les blocs (30 % de chance)
 
-### Fonctionnalités implémentées
+| Icône | Type | Effet |
+|-------|------|-------|
+| 💣 | BombUp (orange) | +1 bombe max (jusqu'à 8) |
+| 🔥 | RangeUp (rouge) | +1 portée explosion (jusqu'à 8) |
+| ⚡ | SpeedUp (cyan) | +0.8 vitesse (jusqu'à 7) |
+| ❤️ | LifeUp (vert) | +1 vie (jusqu'à 5) |
 
-**Système de bombes**
-- Pose avec `Espace` (limite : 1 bombe active par défaut, extensible via `player.maxBombs`)
-- Minuterie de 3 secondes avec mèche visuelle pulsante (couleur jaune → rouge)
-- Le joueur peut marcher sur sa propre bombe après l'avoir posée
+- Révélés quand leur bloc est détruit par une explosion
+- Collectés automatiquement en marchant dessus
+- +50 points + texte flottant coloré à la collecte
 
-**Explosions**
-- Propagation en croix dans 4 directions, portée configurable (`player.bombRange = 2`)
-- Arrêt sur mur indestructible, destruction du premier bloc destructible rencontré
-- Animation radiale dégradée (jaune → orange → transparent) durée 600 ms
-- Particules physiques avec gravité (orange = feu, marron = débris de bloc)
+### Système de score
+- +10 pts par bloc destructible détruit
+- +50 pts par power-up collecté
+- Affiché en temps réel dans le HUD (centre)
 
-**Réactions en chaîne**
-- Une explosion qui touche une autre bombe la déclenche immédiatement (`triggerExplosion` récursif)
+### Système de vies
+- 3 vies au départ (❤️ dans le HUD gauche)
+- Perd 1 vie si touché par une explosion
+- 2 secondes d'invincibilité après chaque coup (joueur clignote)
+- Game Over à 0 vies
 
-**Bruitages Web Audio (sans fichier externe)**
-- Pose de bombe : ton sinus 220 Hz
-- Explosion : burst de bruit blanc filtré passe-bas 600 Hz
-- Destruction de bloc : dents de scie 180→120 Hz
-- Réaction en chaîne : carré 440→330 Hz
+### Écrans de fin
+- **GAME OVER** (rouge) : 0 vies — affiche le score
+- **VICTOIRE !** (vert) : 80 % des blocs détruits — affiche le score final
+- **Entrée** pour rejouer (reset complet : grille, score, vies, stats joueur)
 
-**HUD**
-- Affichage en temps réel : `Bombes: X/Y  Portée: Z`
+### HUD complet
+- Gauche : ❤️ vies
+- Centre : Score
+- Droite : 💣bombes disponibles / 🔥portée / ⚡vitesse
+- Bas : barre de progression (blocs détruits / objectif 80 %)
+
+### Textes flottants
+- "+10" blanc à chaque bloc détruit
+- "+Vitesse", "+Bombe", etc. colorés à chaque power-up
 
 ### Testé et validé
-- Bombe visible avec animation pulsante ✓
-- Blocs détruits après explosion (changement de grille confirmé) ✓
-- Particules générées (130 par explosion de portée 4) ✓
-- HUD mis à jour correctement ✓
-- Réaction en chaîne : logique récursive en place ✓
+- Power-ups révélés et collectés ✓  
+  (bomb: 1→2 maxBombs, range: 2→3, speed: 3→3.8, life: 3→4, score: 0→200)
+- Écran GAME OVER rouge avec score ✓
+- Écran VICTOIRE ! vert avec score final ✓
+- Restart complet via Entrée ✓ (stats + grille remis à zéro)
 
 ---
 
 ## Prêt pour l'étape suivante
 
-En attente des directives pour l'étape 3 (ennemis, IA, power-ups, conditions de victoire/défaite).
+En attente des directives pour l'étape 4 (ennemis avec IA, conditions de victoire enrichies).
