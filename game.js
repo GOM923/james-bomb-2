@@ -202,17 +202,15 @@ function isSolidPixel(px, py) {
   });
 }
 
-// A bomb blocks ANY player — UNLESS the player is currently standing on that tile
-// (they just placed it and haven't stepped off yet).
-// No Sets needed: we simply compare tile positions.
-function bombBlockAt(px, py, player) {
-  const lo = MARGIN, hi = TILE - 1 - MARGIN;
-  for (const [dx,dy] of [[lo,lo],[hi,lo],[lo,hi],[hi,hi]]) {
-    const c = Math.floor((px+dx)/TILE), r = Math.floor((py+dy)/TILE);
-    if (bombs.some(b => b.row===r && b.col===c &&
-                        !(player.row===r && player.col===c))) return true;
-  }
-  return false;
+// Tile-based bomb collision: a bomb blocks a player only when the player's CENTER
+// would enter the bomb's tile. This avoids false positives from hitbox corners
+// overlapping a tile the player is LEAVING (the "stuck behind own bomb" bug).
+function bombBlocksMove(nx, ny, player) {
+  const destCol = Math.floor((nx + TILE/2) / TILE);
+  const destRow = Math.floor((ny + TILE/2) / TILE);
+  // Never block movement that stays within the player's current tile
+  if (destRow === player.row && destCol === player.col) return false;
+  return bombs.some(b => b.row === destRow && b.col === destCol);
 }
 
 // ── AABB corner-cutting movement ──────────────────────────
@@ -227,26 +225,26 @@ function movePlayer(p, dir) {
   if (dir.dy !== 0) {
     // ── Vertical ──
     const ny = p.py + dir.dy * spd;
-    if (!isSolidPixel(p.px, ny) && !bombBlockAt(p.px, ny, p)) {
+    if (!isSolidPixel(p.px, ny) && !bombBlocksMove(p.px, ny, p)) {
       p.py = ny;
       _alignAxis('px', p);
     } else {
       if (_cornerCutAxis('px', p)) {
         const ny2 = p.py + dir.dy * spd;
-        if (!isSolidPixel(p.px, ny2) && !bombBlockAt(p.px, ny2, p))
+        if (!isSolidPixel(p.px, ny2) && !bombBlocksMove(p.px, ny2, p))
           p.py = ny2;
       }
     }
   } else {
     // ── Horizontal ──
     const nx = p.px + dir.dx * spd;
-    if (!isSolidPixel(nx, p.py) && !bombBlockAt(nx, p.py, p)) {
+    if (!isSolidPixel(nx, p.py) && !bombBlocksMove(nx, p.py, p)) {
       p.px = nx;
       _alignAxis('py', p);
     } else {
       if (_cornerCutAxis('py', p)) {
         const nx2 = p.px + dir.dx * spd;
-        if (!isSolidPixel(nx2, p.py) && !bombBlockAt(nx2, p.py, p))
+        if (!isSolidPixel(nx2, p.py) && !bombBlocksMove(nx2, p.py, p))
           p.px = nx2;
       }
     }
@@ -278,7 +276,7 @@ function _cornerCutAxis(axis, p) {
   const chkPx = axis==='px' ? snap : p.px;
   const chkPy = axis==='py' ? snap : p.py;
   if (isSolidPixel(chkPx, chkPy)) return false;
-  if (bombBlockAt(chkPx, chkPy, p)) return false;  // don't snap onto a bomb
+  if (bombBlocksMove(chkPx, chkPy, p)) return false;  // don't snap onto a bomb
   p[axis] = snap;
   return true;
 }
