@@ -202,13 +202,15 @@ function isSolidPixel(px, py) {
   });
 }
 
-// Returns true if the hitbox at (px,py) overlaps a bomb the player didn't place.
-function bombBlockAt(px, py, playerBombs) {
+// A bomb blocks ANY player — UNLESS the player is currently standing on that tile
+// (they just placed it and haven't stepped off yet).
+// No Sets needed: we simply compare tile positions.
+function bombBlockAt(px, py, player) {
   const lo = MARGIN, hi = TILE - 1 - MARGIN;
   for (const [dx,dy] of [[lo,lo],[hi,lo],[lo,hi],[hi,hi]]) {
     const c = Math.floor((px+dx)/TILE), r = Math.floor((py+dy)/TILE);
-    const b = bombs.find(b => b.row===r && b.col===c);
-    if (b && !playerBombs.has(b)) return true;
+    if (bombs.some(b => b.row===r && b.col===c &&
+                        !(player.row===r && player.col===c))) return true;
   }
   return false;
 }
@@ -217,7 +219,7 @@ function bombBlockAt(px, py, playerBombs) {
 // When the player is blocked in their travel direction but is ≤ CORNER_CUT px
 // from the centre of an adjacent corridor, we nudge them orthogonally so they
 // glide into the opening — the classic Bomberman feel.
-function movePlayer(p, dir, playerBombs) {
+function movePlayer(p, dir) {
   if (!p.alive || !dir) return;
 
   const spd = p.speed;
@@ -225,29 +227,26 @@ function movePlayer(p, dir, playerBombs) {
   if (dir.dy !== 0) {
     // ── Vertical ──
     const ny = p.py + dir.dy * spd;
-    if (!isSolidPixel(p.px, ny) && !bombBlockAt(p.px, ny, playerBombs)) {
+    if (!isSolidPixel(p.px, ny) && !bombBlockAt(p.px, ny, p)) {
       p.py = ny;
-      _alignAxis('px', p);   // magnet toward column centre
+      _alignAxis('px', p);
     } else {
-      // Corner-cut: nudge X toward nearest column centre, then retry
       if (_cornerCutAxis('px', p)) {
         const ny2 = p.py + dir.dy * spd;
-        if (!isSolidPixel(p.px, ny2) && !bombBlockAt(p.px, ny2, playerBombs))
+        if (!isSolidPixel(p.px, ny2) && !bombBlockAt(p.px, ny2, p))
           p.py = ny2;
       }
     }
-
   } else {
     // ── Horizontal ──
     const nx = p.px + dir.dx * spd;
-    if (!isSolidPixel(nx, p.py) && !bombBlockAt(nx, p.py, playerBombs)) {
+    if (!isSolidPixel(nx, p.py) && !bombBlockAt(nx, p.py, p)) {
       p.px = nx;
-      _alignAxis('py', p);   // magnet toward row centre
+      _alignAxis('py', p);
     } else {
-      // Corner-cut: nudge Y toward nearest row centre, then retry
       if (_cornerCutAxis('py', p)) {
         const nx2 = p.px + dir.dx * spd;
-        if (!isSolidPixel(nx2, p.py) && !bombBlockAt(nx2, p.py, playerBombs))
+        if (!isSolidPixel(nx2, p.py) && !bombBlockAt(nx2, p.py, p))
           p.px = nx2;
       }
     }
@@ -271,45 +270,60 @@ function _alignAxis(axis, p) {
 
 // Corner-cut on `axis` (orthogonal to travel direction) when the player is blocked.
 // Snaps the player fully to the nearest corridor centre in one frame (magnet).
-// Only triggers if misalignment ≤ CORNER_CUT and the snapped position is free.
+// Checks both solid tiles AND bombs at the snap destination to prevent getting stuck.
 function _cornerCutAxis(axis, p) {
   const snap = Math.round(p[axis] / TILE) * TILE;
   const diff = snap - p[axis];
   if (diff === 0 || Math.abs(diff) > CORNER_CUT) return false;
-  // Verify the snap destination is not itself solid before committing
   const chkPx = axis==='px' ? snap : p.px;
   const chkPy = axis==='py' ? snap : p.py;
   if (isSolidPixel(chkPx, chkPy)) return false;
-  p[axis] = snap;   // instant full correction — classic Bomberman magnet
+  if (bombBlockAt(chkPx, chkPy, p)) return false;  // don't snap onto a bomb
+  p[axis] = snap;
   return true;
 }
 
-// ── Explosion logic ───────────────────────────────────────
-function triggerExplosion(bomb) {
-  soundExplosion();
-  const {row,col,range} = bomb;
-  markExplosion(row,col);
-  for (const [dr,dc] of [[-1,0],[1,0],[0,-1],[0,1]]) {
-    for (let i=1;i<=range;i++) {
-      const r=row+dr*i, c=col+dc*i;
-      if (r<0||r>=ROWS||c<0||c>=COLS) break;
-      if (grid[r][c]===WALL) break;
-      if (grid[r][c]===BLOCK) {
-        grid[r][c]=EMPTY; destroyedBlocks++; markExplosion(r,c); soundBlock();
-        spawnParticles(c*TILE+TILE/2, r*TILE+TILE/2,'#8b5e3c');
-        addScore(bomb.owner, 10);
-        floatingTexts.push({x:c*TILE+TILE/2,y:r*TILE,text:'+10',life:900,color:'#fff'});
-        const key=`${r},${c}`;
-        if (powerups[key]) { visiblePU.push({row:r,col:c,type:powerups[key]}); delete powerups[key]; }
-        break;
+// ── Explosion logic — iterative BFS (no recursion → no stack overflow) ──────
+function triggerExplosion(startBomb) {
+  // Remove the triggering bomb from the live list immediately
+  const startIdx = bombs.indexOf(startBomb);
+  if (startIdx !== -1) bombs.splice(startIdx, 1);
+
+  const queue = [startBomb];
+
+  while (queue.length > 0) {
+    const bomb = queue.shift();
+    soundExplosion();
+    const { row, col, range } = bomb;
+    markExplosion(row, col);
+
+    for (const [dr, dc] of [[-1,0],[1,0],[0,-1],[0,1]]) {
+      for (let i = 1; i <= range; i++) {
+        const r = row + dr*i, c = col + dc*i;
+        if (r<0||r>=ROWS||c<0||c>=COLS) break;
+        if (grid[r][c]===WALL) break;
+        if (grid[r][c]===BLOCK) {
+          grid[r][c]=EMPTY; destroyedBlocks++;
+          markExplosion(r,c); soundBlock();
+          spawnParticles(c*TILE+TILE/2, r*TILE+TILE/2,'#8b5e3c');
+          addScore(bomb.owner, 10);
+          floatingTexts.push({x:c*TILE+TILE/2,y:r*TILE,text:'+10',life:900,color:'#fff'});
+          const key=`${r},${c}`;
+          if (powerups[key]) { visiblePU.push({row:r,col:c,type:powerups[key]}); delete powerups[key]; }
+          break;
+        }
+        markExplosion(r,c);
       }
-      markExplosion(r,c);
     }
-  }
-  for (let i=bombs.length-1;i>=0;i--) {
-    const b=bombs[i]; if (b===bomb) continue;
-    if (explosions.some(e=>e.row===b.row&&e.col===b.col)) {
-      bombs.splice(i,1); soundChain(); triggerExplosion(b);
+
+    // Chain reaction: any bomb now inside the blast zone joins the queue
+    for (let i = bombs.length-1; i >= 0; i--) {
+      const b = bombs[i];
+      if (explosions.some(e => e.row===b.row && e.col===b.col)) {
+        bombs.splice(i, 1);   // remove before queuing — prevents double-processing
+        soundChain();
+        queue.push(b);
+      }
     }
   }
 }
@@ -355,16 +369,11 @@ function checkHit(p, owner, inv, setInv) {
 }
 
 // ── Restart / init ────────────────────────────────────────
-// Tracks which bombs each player "owns" so they can walk over their own
-const p1Bombs = new Set();
-const p2Bombs = new Set();
-
 function startGame() {
   for (let r=0;r<ROWS;r++) grid[r]=[];
   Object.keys(powerups).forEach(k=>delete powerups[k]);
   visiblePU.length=0; bombs.length=0; explosions.length=0;
   particles.length=0; floatingTexts.length=0;
-  p1Bombs.clear(); p2Bombs.clear();
   score=0; score2=0; lives=3; lives2=3;
   invincible=0; invincible2=0;
   totalBlocks=0; destroyedBlocks=0;
@@ -398,14 +407,11 @@ function update(ts) {
   // ── Playing ──
 
   // Movement P1
-  const dir1 = getDir1();
-  movePlayer(p1, p1.alive?dir1:null, p1Bombs);
+  movePlayer(p1, p1.alive ? getDir1() : null);
 
   // Movement P2
-  if (playerCount===2) {
-    const dir2 = getDir2();
-    movePlayer(p2, p2.alive?dir2:null, p2Bombs);
-  }
+  if (playerCount===2)
+    movePlayer(p2, p2.alive ? getDir2() : null);
 
   // Collect power-ups
   [p1,p2].forEach((p,i)=>{
@@ -417,34 +423,28 @@ function update(ts) {
     }
   });
 
-  // Place bombs P1
+  // Place bombs P1 — Space
   if (p1.alive && justPressed('Space')) {
-    const already=bombs.some(b=>b.row===p1.row&&b.col===p1.col);
-    const ownCount=[...p1Bombs].filter(b=>bombs.includes(b)).length;
-    if (!already && ownCount<p1.maxBombs) {
-      const b={row:p1.row,col:p1.col,timer:3000,range:p1.bombRange,owner:1};
-      bombs.push(b); p1Bombs.add(b); soundBomb();
+    const already = bombs.some(b=>b.row===p1.row && b.col===p1.col);
+    if (!already && bombs.filter(b=>b.owner===1).length < p1.maxBombs) {
+      bombs.push({row:p1.row, col:p1.col, timer:3000, range:p1.bombRange, owner:1});
+      soundBomb();
     }
   }
 
   // Place bombs P2 — Shift (Maj)
   if (playerCount===2 && p2.alive && (justPressed('ShiftLeft')||justPressed('ShiftRight'))) {
-    const already=bombs.some(b=>b.row===p2.row&&b.col===p2.col);
-    const ownCount=[...p2Bombs].filter(b=>bombs.includes(b)).length;
-    if (!already && ownCount<p2.maxBombs) {
-      const b={row:p2.row,col:p2.col,timer:3000,range:p2.bombRange,owner:2};
-      bombs.push(b); p2Bombs.add(b); soundBomb();
+    const already = bombs.some(b=>b.row===p2.row && b.col===p2.col);
+    if (!already && bombs.filter(b=>b.owner===2).length < p2.maxBombs) {
+      bombs.push({row:p2.row, col:p2.col, timer:3000, range:p2.bombRange, owner:2});
+      soundBomb();
     }
   }
 
-  // Bomb timers
-  for (let i=bombs.length-1;i>=0;i--) {
-    bombs[i].timer-=dt;
-    if (bombs[i].timer<=0) {
-      const b=bombs.splice(i,1)[0];
-      p1Bombs.delete(b); p2Bombs.delete(b);
-      triggerExplosion(b);
-    }
+  // Bomb timers — triggerExplosion now removes the bomb itself from the array
+  for (let i=bombs.length-1; i>=0; i--) {
+    bombs[i].timer -= dt;
+    if (bombs[i].timer <= 0) triggerExplosion(bombs[i]);
   }
 
   // Explosion lifetime
